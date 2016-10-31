@@ -11,7 +11,7 @@ L.Control.Overview = L.Control.extend({
   options: {
     position: 'bottomright',
 
-    reactangle:       true,
+    rectangle:        true,
     rectangleClass:   L.Rectangle,
     rectangleOptions: {
       draggable: true,
@@ -21,9 +21,13 @@ L.Control.Overview = L.Control.extend({
     mapOptions:       {
       attributionControl: false,
       zoomControl:        false,
-      boxZoom:            false
+      boxZoom:            false,
+      zoomAnimation:      false
     },
+
+    fixedZoomLevel:   false,
     zoomOffset:       3,
+
     autoDetectLayers: true,
     filterLayers:     layer => (
       layer instanceof L.TileLayer    ||
@@ -36,6 +40,8 @@ L.Control.Overview = L.Control.extend({
     className:          'leaflet-bar leaflet-overview',
     mapClassName:       'leaflet-overview--map',
     rectangleClassName: 'leaflet-overview--rectangle',
+
+    updateDelay: 300
   },
 
   /**
@@ -66,6 +72,9 @@ L.Control.Overview = L.Control.extend({
      */
     this._layers      = L.Util.isArray(layers) ? layers : [layers];
 
+    this._updateThrottled = L.Util.throttle(
+      this._update, this.options.updateDelay, this);
+
     L.Control.prototype.initialize.call(this, options);
   },
 
@@ -80,8 +89,9 @@ L.Control.Overview = L.Control.extend({
       this.options.mapClassName, this._container);
 
     map
-      .on('moveend zoomend viewreset', this._update, this)
-      .on('layeradd', this._onLayerAdded, this);
+      .on('moveend zoomend viewreset', this._updateThrottled, this)
+      .on('layeradd',  this._onLayerAdded,   this)
+      .on('move', this._onMapMove, this);
 
     this._createMap();
 
@@ -95,8 +105,9 @@ L.Control.Overview = L.Control.extend({
     this._overviewmap = this._rectangle = null;
 
     map
-      .off('moveend zoomend viewreset', this._update, this)
-      .off('layeradd', this._onLayerAdded, this);
+      .off('moveend zoomend viewreset', this._updateThrottled, this)
+      .off('layeradd',  this._onLayerAdded, this)
+      .off('move', this._onMapMove, this);
   },
 
 
@@ -113,13 +124,21 @@ L.Control.Overview = L.Control.extend({
   _createMap () {
     L.Util.requestAnimFrame(() => {
       const OverviewMap = this.options.minimapClass;
+      const zoom = (typeof this.options.fixedZoomLevel === 'number') ?
+        this.options.fixedZoomLevel:
+        this._map.getZoom() - this.options.zoomOffset;
+
       this._overviewmap = new OverviewMap(
         this._mapContainer,
         this.options.mapOptions)
-        .setView(this._map.getCenter(),
-          this._map.getZoom() - this.options.zoomOffset);
+        .setView(this._map.getCenter(), zoom);
 
-      this._overviewmap.on('moveend', this._onMoveend, this);
+      this._overviewmap
+        .on('dragstart', this._onMapDragStart, this)
+        .on('drag',      this._onMapDrag,      this)
+        .on('dragend',   this._onMapDragEnd,   this)
+        .on('moveend',   this._onMoveend,      this);
+
       for (let i = 0, len = this._layers.length; i < len; i++) {
         this._overviewmap.addLayer(this._layers[i]);
       }
@@ -129,12 +148,14 @@ L.Control.Overview = L.Control.extend({
 
 
   _createRect () {
-    const Rectangle = this.options.rectangleClass;
-    this._rect = new Rectangle(this._map.getBounds(),
-      L.Util.extend({ className: this.options.rectangleClassName },
-        this.options.rectangleOptions));
-    this._rect.on('dragend', this._onRectDragend, this);
-    this._overviewmap.addLayer(this._rect);
+    if (this.options.rectangle) {
+      const Rectangle = this.options.rectangleClass;
+      this._rect = new Rectangle(this._map.getBounds(),
+        L.Util.extend({ className: this.options.rectangleClassName },
+          this.options.rectangleOptions));
+      this._rect.on('dragend', this._onRectDragend, this);
+      this._overviewmap.addLayer(this._rect);
+    }
   },
 
 
@@ -143,25 +164,62 @@ L.Control.Overview = L.Control.extend({
   },
 
 
-  _onMoveend () {
-    if (this._skipUpdate) {
-      this._skipUpdate = false;
-    } else {
+  /**
+   * Mini-map -> main map update
+   */
+  _onMoveend (evt) {
+    if (!this._skipUpdate) {
+      console.log('tttt');
+      this._skipUpdate = true;
       this._map.setView(this._overviewmap.getCenter());
     }
   },
 
 
-  _update () {
-    this._skipUpdate = true;
-    this._overviewmap.setView(this._map.getCenter(),
-      this._map.getZoom() - this.options.zoomOffset);
+  /**
+   * Main map -> overview map update
+   */
+  _update (evt) {
+    if (this._skipUpdate) {
+      this._skipUpdate = false;
+      return;
+    }
+    console.log('update from the map');
+    const zoom = this.options.fixedZoomLevel ?
+      this._overviewmap.getZoom() :
+      this._map.getZoom() - this.options.zoomOffset;
+    this._overviewmap.setView(this._map.getCenter(), zoom);
     this._rect.setLatLngs(this._rect._boundsToLatLngs(this._map.getBounds()));
   },
 
 
   _onRectDragend () {
+    this._skipUpdate = true;
     this._overviewmap.setView(this._rect.getBounds().getCenter());
+    this._map.setView(this._rect.getBounds().getCenter());
+  },
+
+
+  _onMapDragStart () {
+
+  },
+
+
+  _onMapDragEnd () {
+
+  },
+
+
+  _onMapDrag () {
+    //this._rect.setLatLngs(this._map.getBounds());
+  },
+
+
+  _onMapMove () {
+    if (this._rect) {
+      //this._skipUpdate = true;
+      //this._rect.setBounds(this._map.getBounds());
+    }
   }
 
 });

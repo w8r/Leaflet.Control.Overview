@@ -9,6 +9,7 @@
     "lint": "eslint ./src/",
     "lint:watch": "nodemon --exec 'npm run lint'",
     "demo": "watchify -v -d demo/app.js -o demo/bundle.js",
+    "build-js": "browserify -s L.Control.Overview index.js -o dist/L.Control.Overview-src.js",
     "start": "npm run demo & npm run server & npm run lint:watch & npm run test:watch",
     "server": "http-server -p 3003"
   },
